@@ -150,6 +150,7 @@ func batchDetail(w http.ResponseWriter, batchID int64) {
 		tier("未开桶·在店", "c.stage='DELIVERED' AND c.tapped_at IS NULL"),
 		tier("已开桶·在店/在售", "c.tapped_at IS NOT NULL AND c.stage IN ('TAPPED','EMPTY','RESERVED')"),
 		tier("回收在途/待清洗", "c.stage IN ('RETURNED')"),
+		tier("清洗不合格返修中", "c.stage='REPAIRING'"),
 		tier("已闭环(清洗合格/不合格/丢失)", "c.stage IN ('WASHED','FAILED') OR c.lost"),
 	}
 

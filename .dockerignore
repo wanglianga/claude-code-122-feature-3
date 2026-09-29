@@ -1,0 +1,15 @@
+.git
+.pgdata
+.npm-cache
+node_modules
+**/node_modules
+frontend/dist
+backend/web/dist
+*.log
+.claude
+.codex
+screenshots
+recordings
+traces
+tmp
+temp

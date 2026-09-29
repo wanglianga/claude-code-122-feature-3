@@ -14,6 +14,7 @@ const ACCOUNTS = [
   { username: 'driver1', name: '上海司机·王师傅' },
   { username: 'driver2', name: '北京司机·李师傅' },
   { username: 'wash1', name: '上海净桶中心' },
+  { username: 'wash2', name: '北京洗桶站·马师傅' },
   { username: 'dealer1', name: '华东经销商·林经理' }
 ]
 

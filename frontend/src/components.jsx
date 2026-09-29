@@ -4,18 +4,26 @@ import React, { createContext, useContext, useState, useCallback } from 'react'
 export const KEG_STATUS = {
   IN_STOCK: ['酒厂仓库', 'green'], IN_TRANSIT: ['配送中', 'blue'], AT_BAR: ['在店', 'blue'],
   EMPTY_RESERVED: ['空桶待回收', 'amber'], PICKED: ['司机已收', 'purple'],
-  AT_WASH: ['清洗中', 'purple'], WASH_FAIL: ['清洗不合格', 'red'], LOST: ['丢失', 'red'],
+  AT_WASH: ['清洗中', 'purple'], WASH_FAIL: ['清洗不合格', 'red'], REPAIR: ['不合格返修中', 'red'],
+  LOST: ['丢失', 'red'],
   SCRAPPED: ['报废', 'gray']
 }
 export const STAGE = {
   DELIVERED: ['已配送未开桶', 'blue'], TAPPED: ['已开桶', 'amber'], EMPTY: ['已打空', 'amber'],
   RESERVED: ['已预约回收', 'amber'], RETURNED: ['已回收', 'purple'],
-  WASHED: ['清洗合格', 'green'], FAILED: ['清洗不合格', 'red']
+  WASHED: ['清洗合格', 'green'], FAILED: ['清洗不合格', 'red'], REPAIRING: ['不合格返修中', 'red']
 }
 export const DEPOSIT = {
   HELD: ['押金占用中', 'amber'], RELEASED: ['已释放', 'green'],
   DEDUCTED: ['已扣款', 'red'], PARTIAL: ['部分扣款', 'amber']
 }
+export const REPAIR_STATUS = {
+  OPEN: ['返修中', 'red'], SUBMITTED: ['待仓库确认', 'amber'],
+  CONFIRMED: ['复检合格·已回库', 'green'], REJECTED: ['复检退回', 'red'], SCRAPPED: ['报废', 'gray']
+}
+export const CHARGE_TYPE = { REPAIR_FEE: '返修费用', DEPOSIT_DEDUCT: '押金扣减' }
+export const CHARGE_STATUS = { PENDING: ['待财务确认', 'amber'], CONFIRMED: ['已确认入账', 'green'], VOID: ['已作废', 'gray'] }
+export const PARTY_TYPE = { BAR: '酒吧', WASHPLANT: '清洗厂' }
 export const BATCH_STATUS = {
   NORMAL: ['正常', 'green'], SUSPENDED: ['暂停销售', 'red'],
   RECALLED: ['召回中', 'red'], CLEARED: ['已解除', 'gray']
@@ -91,4 +99,61 @@ export function Empty({ text = '暂无数据' }) {
 
 export function Th({ children, w }) {
   return <th style={w ? { width: w } : undefined}>{children}</th>
+}
+
+// 照片读取为 base64（data URL），供返修缺陷/复检上传
+export function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(fr.result)
+    fr.onerror = reject
+    fr.readAsDataURL(file)
+  })
+}
+
+// 多图上传：产出 [{name, content_type, data}]
+export function PhotoUploader({ photos, setPhotos, hint }) {
+  const onPick = async (files) => {
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith('image/')) continue
+      if (f.size > 3 * 1024 * 1024) { alert(`${f.name} 超过 3MB`); continue }
+      const dataUrl = await readFileAsDataURL(f)
+      const [head, data] = dataUrl.split(',')
+      const ctype = (head.match(/data:(.*?);/) || [])[1] || 'image/png'
+      setPhotos(x => [...x, { name: f.name, content_type: ctype, data, _preview: dataUrl }])
+    }
+  }
+  return (
+    <div>
+      <label className="ghost small" style={{ display: 'inline-block', cursor: 'pointer', border: '1px dashed var(--line)', padding: '6px 12px', borderRadius: 8 }}>
+        ＋ 上传桶体照片（仓库留档，必传）
+        <input type="file" accept="image/*" multiple style={{ display: 'none' }}
+          onChange={e => { onPick(e.target.files); e.target.value = '' }} />
+      </label>
+      {hint && <div className="small muted" style={{ marginTop: 4 }}>{hint}</div>}
+      <div className="photogrid" style={{ marginTop: 8 }}>
+        {photos.map((p, i) => (
+          <div key={i} className="photochip">
+            <img src={p._preview || ('data:' + p.content_type + ';base64,' + p.data)} alt={p.name} />
+            <button type="button" className="photo-del" onClick={() => setPhotos(x => x.filter((_, j) => j !== i))}>✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// 照片展示（返修详情，点击新窗口看原图）
+export function PhotoGallery({ photos }) {
+  if (!photos || photos.length === 0) return <span className="muted small">暂无照片</span>
+  return (
+    <div className="photogrid">
+      {photos.map(p => (
+        <a key={p.id} className="photochip" href={p.data_url} target="_blank" rel="noreferrer" title={p.file_name}>
+          <img src={p.data_url} alt={p.file_name} />
+          <span className="photo-cap">{p.stage === 'DEFECT' ? '缺陷取证' : '返修复检'}</span>
+        </a>
+      ))}
+    </div>
+  )
 }

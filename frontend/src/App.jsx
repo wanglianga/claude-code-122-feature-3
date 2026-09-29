@@ -10,6 +10,7 @@ import Orders from './pages/Orders.jsx'
 import BarPage from './pages/BarPage.jsx'
 import DriverPage from './pages/DriverPage.jsx'
 import WashPage from './pages/WashPage.jsx'
+import RepairConfirmPage from './pages/RepairConfirmPage.jsx'
 import QCPage from './pages/QCPage.jsx'
 import FinancePage from './pages/FinancePage.jsx'
 import NotificationsPage from './pages/NotificationsPage.jsx'
@@ -23,6 +24,7 @@ const NAV = [
   { to: '/bar', label: '我的在店桶', roles: ['admin', 'bar_manager'] },
   { to: '/driver', label: '回收扫码', roles: ['admin', 'driver'] },
   { to: '/wash', label: '清洗检测', roles: ['admin', 'washplant'] },
+  { to: '/repairs-confirm', label: '返修确认', roles: ['admin', 'brewery'] },
   { to: '/qc', label: '品控看板', roles: ['admin', 'brewery', 'qc'] },
   { to: '/finance', label: '押金财务', roles: ['admin', 'brewery', 'finance'] },
   { to: '/notifications', label: '通知中心', roles: ['admin', 'brewery', 'qc', 'finance', 'bar_manager', 'driver', 'dealer', 'washplant'] }
@@ -80,6 +82,7 @@ function Shell() {
           <Route path="/bar" element={<BarPage />} />
           <Route path="/driver" element={<DriverPage />} />
           <Route path="/wash" element={<WashPage />} />
+          <Route path="/repairs-confirm" element={<RepairConfirmPage />} />
           <Route path="/qc" element={<QCPage />} />
           <Route path="/finance" element={<FinancePage />} />
           <Route path="/notifications" element={<NotificationsPage />} />

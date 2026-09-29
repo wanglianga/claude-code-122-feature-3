@@ -257,9 +257,9 @@ func handleDriverAudit(w http.ResponseWriter, r *http.Request) {
 			missed++
 		}
 
-		// 3) 账期已过仍未闭环 → 延迟归还
+		// 3) 账期已过仍未闭环 → 延迟归还（返修流程中属于已回收异常处理，不再计延迟归还）
 		res, err := tx.Exec(`UPDATE keg_cycles SET late_return=TRUE
-			WHERE deposit_due_date < CURRENT_DATE AND stage NOT IN ('WASHED','FAILED') AND NOT late_return`)
+			WHERE deposit_due_date < CURRENT_DATE AND stage NOT IN ('WASHED','FAILED','REPAIRING') AND NOT late_return`)
 		if err != nil {
 			return err
 		}

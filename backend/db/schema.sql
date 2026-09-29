@@ -81,10 +81,11 @@ CREATE TABLE IF NOT EXISTS kegs (
     capacity_liters NUMERIC(6,2) NOT NULL,      -- 容量（20L/30L/50L）
     tare_weight_kg  NUMERIC(6,2),
     -- 资产状态：IN_STOCK 酒厂仓库 / IN_TRANSIT 配送中 / AT_BAR 在店 / EMPTY_RESERVED 空桶待回收
-    --           PICKED 司机已收 / AT_WASH 在洗桶厂 / WASH_FAIL 清洗不合格 / LOST 丢失 / SCRAPPED 报废
+    --           PICKED 司机已收 / AT_WASH 在洗桶厂 / WASH_FAIL 清洗不合格 / REPAIR 不合格返修中
+    --           LOST 丢失 / SCRAPPED 报废
     asset_status    TEXT NOT NULL DEFAULT 'IN_STOCK'
         CHECK (asset_status IN ('IN_STOCK','IN_TRANSIT','AT_BAR','EMPTY_RESERVED','PICKED',
-                                'AT_WASH','WASH_FAIL','LOST','SCRAPPED')),
+                                'AT_WASH','WASH_FAIL','REPAIR','LOST','SCRAPPED')),
     refillable      BOOLEAN NOT NULL DEFAULT TRUE,  -- 再灌装资格
     current_bar_id  BIGINT REFERENCES bars(id),
     current_cycle_id BIGINT,
@@ -132,8 +133,9 @@ CREATE TABLE IF NOT EXISTS keg_cycles (
     deposit_due_date DATE NOT NULL,                 -- 押金账期到期日
     -- 周期阶段：DELIVERED 已配送在店 / TAPPED 已开桶 / EMPTY 已打空
     --           RESERVED 已预约回收 / RETURNED 已回收 / WASHED 清洗合格 / FAILED 清洗不合格
+    --           REPAIRING 不合格返修中（返修经酒厂仓库复检确认后回到 WASHED）
     stage            TEXT NOT NULL DEFAULT 'DELIVERED'
-        CHECK (stage IN ('DELIVERED','TAPPED','EMPTY','RESERVED','RETURNED','WASHED','FAILED')),
+        CHECK (stage IN ('DELIVERED','TAPPED','EMPTY','RESERVED','RETURNED','WASHED','FAILED','REPAIRING')),
     tapped_at        TIMESTAMPTZ,
     emptied_at       TIMESTAMPTZ,
     return_reserved_at TIMESTAMPTZ,
@@ -213,6 +215,7 @@ CREATE TABLE IF NOT EXISTS wash_checks (
     id           BIGSERIAL PRIMARY KEY,
     cycle_id     BIGINT NOT NULL REFERENCES keg_cycles(id),
     washplant_id BIGINT NOT NULL REFERENCES washplants(id),
+    wash_batch_no TEXT,                            -- 清洗批次号（返修追溯用）
     inspector    TEXT,
     passed       BOOLEAN NOT NULL,
     pressure_ok  BOOLEAN NOT NULL DEFAULT TRUE,
@@ -224,6 +227,85 @@ CREATE TABLE IF NOT EXISTS wash_checks (
 
 ALTER TABLE keg_cycles ADD CONSTRAINT fk_cycles_wash FOREIGN KEY (wash_id)
     REFERENCES wash_checks(id) DEFERRABLE INITIALLY DEFERRED;
+
+-- ---------- 清洗不合格返修 ----------
+
+-- 返修单：清洗厂判不合格后发起，平台据此追溯上一家酒吧 / 回收司机 / 清洗批次
+CREATE TABLE IF NOT EXISTS keg_repairs (
+    id               BIGSERIAL PRIMARY KEY,
+    repair_no        TEXT NOT NULL UNIQUE,            -- 返修单号 RP-0001
+    keg_id           BIGINT NOT NULL REFERENCES kegs(id),
+    cycle_id         BIGINT NOT NULL REFERENCES keg_cycles(id),
+    wash_check_id    BIGINT REFERENCES wash_checks(id),
+    washplant_id     BIGINT NOT NULL REFERENCES washplants(id),
+    -- 追溯快照（返修发起瞬间的责任链路）
+    wash_batch_no    TEXT,                            -- 清洗批次
+    bar_id           BIGINT REFERENCES bars(id),      -- 上一家酒吧
+    driver_id        BIGINT REFERENCES drivers(id),   -- 回收司机
+    batch_id         BIGINT REFERENCES batches(id),   -- 桶内酒液批次
+    -- 缺陷：异味 / 阀门损坏（也可写其他说明）
+    defect_type      TEXT NOT NULL DEFAULT '异味'
+        CHECK (defect_type IN ('异味','阀门损坏','变形','其他')),
+    defect_note      TEXT,
+    -- 费用与押金扣减（登记时同步生成）
+    repair_fee       NUMERIC(10,2) NOT NULL DEFAULT 0,    -- 返修费用
+    deposit_deduct   NUMERIC(10,2) NOT NULL DEFAULT 0,    -- 押金扣减
+    fee_party        TEXT NOT NULL DEFAULT 'BAR'
+        CHECK (fee_party IN ('BAR','WASHPLANT')),         -- 费用承担方：酒吧 / 清洗厂
+    -- 状态：OPEN 返修中 / SUBMITTED 清洗厂已上传复检待仓库确认
+    --       CONFIRMED 仓库确认合格·恢复可灌装 / REJECTED 复检仍不合格 / SCRAPPED 报废
+    status           TEXT NOT NULL DEFAULT 'OPEN'
+        CHECK (status IN ('OPEN','SUBMITTED','CONFIRMED','REJECTED','SCRAPPED')),
+    -- 返修后复检结果（清洗厂返修完成时上传）
+    recheck_result   TEXT,
+    recheck_inspector TEXT,
+    recheck_note     TEXT,
+    submitted_at     TIMESTAMPTZ,
+    confirmed_by     BIGINT REFERENCES app_users(id),
+    confirmed_at     TIMESTAMPTZ,
+    confirm_note     TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 桶体照片：登记缺陷与返修复检各阶段上传，仓库长期保留
+CREATE TABLE IF NOT EXISTS repair_photos (
+    id          BIGSERIAL PRIMARY KEY,
+    repair_id   BIGINT NOT NULL REFERENCES keg_repairs(id) ON DELETE CASCADE,
+    stage       TEXT NOT NULL DEFAULT 'DEFECT'
+        CHECK (stage IN ('DEFECT','RECHECK')),   -- 缺陷取证 / 返修复检
+    file_name   TEXT NOT NULL,
+    content_type TEXT NOT NULL DEFAULT 'image/png',
+    data        BYTEA NOT NULL,
+    uploaded_by BIGINT REFERENCES app_users(id),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 账单条目：返修费用与押金扣减入账。费用进入对应酒吧或清洗厂账单
+CREATE TABLE IF NOT EXISTS billing_charges (
+    id           BIGSERIAL PRIMARY KEY,
+    repair_id    BIGINT NOT NULL REFERENCES keg_repairs(id),
+    keg_id       BIGINT NOT NULL REFERENCES kegs(id),
+    cycle_id     BIGINT REFERENCES keg_cycles(id),
+    charge_type  TEXT NOT NULL CHECK (charge_type IN ('REPAIR_FEE','DEPOSIT_DEDUCT')),
+    party_type   TEXT NOT NULL CHECK (party_type IN ('BAR','WASHPLANT')),
+    party_id     BIGINT,                              -- bars.id / washplants.id
+    bar_id       BIGINT REFERENCES bars(id),          -- 押金扣减对应酒吧（冗余便于查账）
+    amount       NUMERIC(10,2) NOT NULL,
+    memo         TEXT,
+    -- PENDING 待财务确认 / CONFIRMED 已确认入账 / VOID 作废
+    status       TEXT NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING','CONFIRMED','VOID')),
+    created_by   BIGINT REFERENCES app_users(id),
+    confirmed_by BIGINT REFERENCES app_users(id),
+    confirmed_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_repairs_status ON keg_repairs(status);
+CREATE INDEX IF NOT EXISTS idx_repairs_keg ON keg_repairs(keg_id);
+CREATE INDEX IF NOT EXISTS idx_repair_photos_repair ON repair_photos(repair_id);
+CREATE INDEX IF NOT EXISTS idx_charges_party ON billing_charges(party_type, party_id, status);
+CREATE INDEX IF NOT EXISTS idx_charges_repair ON billing_charges(repair_id);
 
 -- 召回/停售通知
 CREATE TABLE IF NOT EXISTS notifications (

@@ -29,7 +29,13 @@ export default function Overview() {
         <Stat label="司机漏扫待核查" value={d.missing_scan} kind={d.missing_scan ? 'alert' : 'ok'}
           sub={<Link to="/driver">去回收任务核对 →</Link>} />
         <Stat label="清洗不合格桶" value={d.wash_fail} kind={d.wash_fail ? 'alert' : 'ok'}
-          sub={<Link to="/qc">取消再灌装资格 →</Link>} />
+          sub={<Link to="/wash">发起返修 →</Link>} />
+        <Stat label="返修中" value={d.repair_open} kind={d.repair_open ? 'alert' : 'ok'}
+          sub={<Link to="/wash">清洗厂返修处理 →</Link>} />
+        <Stat label="返修待仓库确认" value={d.repair_to_confirm} kind={d.repair_to_confirm ? 'warn' : 'ok'}
+          sub={<Link to="/repairs-confirm">复检确认恢复灌装 →</Link>} />
+        <Stat label="返修账单待确认" value={d.billing_pending} kind={d.billing_pending ? 'warn' : 'ok'}
+          sub={<Link to="/finance">财务确认入账 →</Link>} />
         <Stat label="丢失酒桶" value={d.lost} kind={d.lost ? 'alert' : 'ok'}
           sub={<Link to="/finance">押金扣款 →</Link>} />
         <Stat label="桶体变形" value={d.deformed} kind={d.deformed ? 'warn' : 'ok'} />

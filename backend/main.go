@@ -51,7 +51,15 @@ func main() {
 		log.Println("数据库初始化完成（schema + 种子数据）")
 		return
 	}
-
+	// waitpg：仅探活数据库，供容器 entrypoint 等待就绪
+	if len(os.Args) > 1 && os.Args[1] == "waitpg" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	mux := http.NewServeMux()
 	registerRoutes(mux)
 
@@ -61,6 +69,16 @@ func main() {
 }
 
 func initDB() error {
+	// 幂等：已有业务数据则跳过（容器重启/重复 init 场景）
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM information_schema.tables
+		WHERE table_schema='public' AND table_name='kegs'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		log.Println("数据库已初始化，跳过 schema/种子加载")
+		return nil
+	}
 	for _, name := range []string{"db/schema.sql", "db/seed.sql"} {
 		b, err := sqlFS.ReadFile(name)
 		if err != nil {
@@ -115,12 +133,21 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/wash/pending", hr("washplant brewery admin", handleWashPending))
 	mux.HandleFunc("/api/wash/checks", hr("washplant admin", handleWashCheck))
 
+	// 清洗不合格返修
+	mux.HandleFunc("/api/repairs", hr("washplant brewery finance qc admin", handleRepairList))
+	mux.HandleFunc("/api/repairs/", h(routeRepairs))
+
 	// 品控
 	mux.HandleFunc("/api/qc/overview", hr("qc brewery admin", handleQCOverview))
 
 	// 财务
 	mux.HandleFunc("/api/finance/deposits", hr("finance brewery admin", handleDeposits))
 	mux.HandleFunc("/api/finance/settle/", hr("finance admin", handleSettleDeposit))
+	mux.HandleFunc("/api/finance/billing", hr("finance admin", handleBillingList))
+	mux.HandleFunc("/api/finance/billing/confirm/", hr("finance admin", handleBillingConfirm))
+
+	// 酒吧返修账单
+	mux.HandleFunc("/api/bar/billing", hr("bar_manager admin", handleBarBilling))
 
 	// 通知
 	mux.HandleFunc("/api/notifications", h(handleNotifications))

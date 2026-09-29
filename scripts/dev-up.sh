@@ -47,6 +47,17 @@ if [ "${RESET_DB:-0}" = "1" ]; then
 fi
 
 cd "$ROOT/backend"
+# go:embed 需要前端构建产物：缺失时自动构建（需 Node.js ≥ 18）
+if [ ! -f web/dist/index.html ]; then
+  if command -v npm >/dev/null 2>&1; then
+    echo "[2.5/3] 未发现 backend/web/dist，自动构建前端"
+    (cd "$ROOT/frontend" && { [ -d node_modules ] || npm install --cache "$ROOT/.npm-cache"; } && npm run build)
+  else
+    echo "警告：未找到 npm，且 backend/web/dist 缺失，Go embed 构建将失败。" >&2
+    echo "请先在 frontend/ 执行 npm install && npm run build，或使用 docker compose up。" >&2
+    exit 1
+  fi
+fi
 # 数据库为空表时自动初始化
 if [ "$(psql -h /tmp -p 5433 -U node kegplatform -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")" = "0" ]; then
   echo "[2/3] 加载 schema 与种子数据"

@@ -3,7 +3,7 @@ import { api } from '../api.js'
 import { Badge, KEG_STATUS, STAGE, DEPOSIT, Modal, Flags, Empty } from '../components.jsx'
 
 const ASSET_OPTS = [['', '全部资产状态'], ['IN_STOCK', '酒厂仓库'], ['AT_BAR', '在店'], ['EMPTY_RESERVED', '空桶待回收'],
-  ['PICKED', '司机已收'], ['WASH_FAIL', '清洗不合格'], ['LOST', '丢失']]
+  ['PICKED', '司机已收'], ['WASH_FAIL', '清洗不合格'], ['REPAIR', '不合格返修中'], ['LOST', '丢失']]
 
 export default function Kegs() {
   const [list, setList] = useState([])
@@ -120,6 +120,9 @@ const EVENT_NAME = {
   DELIVERED: '配送签收', TAPPED: '开桶售酒', TAP_FEEDBACK: '开桶反馈', EMPTIED: '酒桶打空',
   RETURN_RESERVED: '预约回收', PICKED: '司机扫码回收', MISSING_SCAN: '司机漏扫（审计）',
   WASHED: '清洗检测合格·回库', WASH_FAILED: '清洗检测不合格',
+  REPAIR_CREATED: '发起不合格返修（暂停灌装）', REPAIR_SUBMITTED: '返修完成·上传复检',
+  REPAIR_CONFIRMED: '仓库复检合格·恢复灌装', REPAIR_REJECTED: '仓库复检退回',
+  BILLING_CONFIRMED: '返修账单财务确认',
   DEPOSIT_SETTLED: '押金结算', MARKED_LOST: '登记丢失'
 }
 

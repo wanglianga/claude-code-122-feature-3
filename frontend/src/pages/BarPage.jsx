@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api.js'
-import { Badge, STAGE, DEPOSIT, BATCH_STATUS, Modal, useToast, Flags, Empty } from '../components.jsx'
+import { Badge, STAGE, DEPOSIT, BATCH_STATUS, Modal, useToast, Flags, Empty, Money, CHARGE_TYPE, CHARGE_STATUS } from '../components.jsx'
 
 export default function BarPage() {
   const [cycles, setCycles] = useState([])
@@ -8,10 +8,14 @@ export default function BarPage() {
   const [fb, setFb] = useState(null)
   const [reserve, setReserve] = useState([])
   const [reserveOpen, setReserveOpen] = useState(false)
+  const [billingOpen, setBillingOpen] = useState(false)
+  const [billCount, setBillCount] = useState(0)
   const toast = useToast()
 
   const load = () => api('/bar/cycles').then(d => { setCycles(d.cycles); setBarId(d.bar_id) })
-  useEffect(load, [])
+  const loadBillingCount = () => api('/bar/billing').then(d =>
+    setBillCount((d.charges || []).filter(c => c.status === 'PENDING').length))
+  useEffect(() => { load(); loadBillingCount() }, [])
 
   const toggleReserve = (id) => setReserve(x => x.includes(id) ? x.filter(v => v !== id) : [...x, id])
 
@@ -27,6 +31,9 @@ export default function BarPage() {
           预约回收（已选 {reserve.length} 只空桶）
         </button>
         <span className="spacer" />
+        <button className="subtle" onClick={() => setBillingOpen(true)}>
+          本店返修账单{billCount > 0 && <span className="badge red" style={{ marginLeft: 6 }}>{billCount} 待确认</span>}
+        </button>
         <button className="subtle" onClick={load}>刷新</button>
       </div>
 
@@ -63,7 +70,10 @@ export default function BarPage() {
                         onClick={async () => { try { await api('/cycles/empty/' + c.cycle_id, { method: 'POST' }); toast('已标记打空，可预约回收'); load() } catch (e) { toast(e.message, 'err') } }}>
                         标记打空
                       </button>}
-                    {['RESERVED', 'RETURNED', 'WASHED', 'FAILED'].includes(c.stage) && <span className="muted small">回收流程中</span>}
+                    {['RESERVED', 'RETURNED', 'WASHED', 'FAILED', 'REPAIRING'].includes(c.stage) &&
+                      (c.stage === 'REPAIRING'
+                        ? <span className="badge red">清洗不合格返修中·暂停再灌装</span>
+                        : <span className="muted small">回收流程中</span>)}
                   </td>
                 </tr>
               )
@@ -76,7 +86,42 @@ export default function BarPage() {
       {fb && <FeedbackModal c={fb} onClose={() => setFb(null)} onDone={() => { setFb(null); load() }} />}
       {reserveOpen && <ReserveModal ids={reserve} onClose={() => setReserveOpen(false)}
         onDone={() => { setReserveOpen(false); setReserve([]); load() }} />}
+      {billingOpen && <BarBillingModal onClose={() => { setBillingOpen(false); loadBillingCount() }} />}
     </div>
+  )
+}
+
+function BarBillingModal({ onClose }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api('/bar/billing').then(setD) }, [])
+  return (
+    <Modal wide title="本店返修账单" onClose={onClose}>
+      <div className="muted small" style={{ marginBottom: 10 }}>
+        归还酒桶在清洗厂检测中发现异味/阀门损坏等缺陷而返修时，返修费用与押金扣减进入本店账单；财务确认后正式入账。
+      </div>
+      {d && <div className="grid cols-2" style={{ marginBottom: 10 }}>
+        <div className="panel stat warn"><span className="num">¥{d.summary.pending_amount}</span><span className="lbl">待财务确认（{d.summary.pending_count} 条）</span></div>
+        <div className="panel stat ok"><span className="num">¥{d.summary.confirmed_amount}</span><span className="lbl">已确认入账（{d.summary.confirmed_count} 条）</span></div>
+      </div>}
+      <div className="tablewrap">
+        <table className="minitable">
+          <thead><tr><th>桶/返修单</th><th>类型</th><th>金额</th><th>摘要</th><th>状态</th><th>时间</th></tr></thead>
+          <tbody>
+            {(d?.charges || []).map(c => (
+              <tr key={c.id}>
+                <td><code className="kcode">{c.keg_code}</code><div className="small muted">{c.repair_no}</div></td>
+                <td>{CHARGE_TYPE[c.charge_type]}</td>
+                <td><Money v={c.amount} /></td>
+                <td className="small muted">{c.memo}</td>
+                <td><Badge map={CHARGE_STATUS} value={c.status} /></td>
+                <td className="small muted">{c.confirmed_at || c.created_at}</td>
+              </tr>
+            ))}
+            {d && d.charges.length === 0 && <tr><td colSpan={6}><Empty text="本店暂无返修账单" /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
   )
 }
 

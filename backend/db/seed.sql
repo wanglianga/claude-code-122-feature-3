@@ -14,6 +14,7 @@ INSERT INTO app_users (id, username, display_name, role, org_id, password_sha) V
  (20,'driver1','王师傅(上海司机)','driver',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (21,'driver2','李师傅(北京司机)','driver',2,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (30,'wash1','上海净桶中心','washplant',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
+ (31,'wash2','北京洗桶站·马师傅','washplant',2,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (40,'dealer1','华东精酿经销·林经理','dealer',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791');
 SELECT setval(pg_get_serial_sequence('app_users','id'), 100);
 
@@ -91,16 +92,17 @@ INSERT INTO keg_cycles (id,keg_id,batch_id,order_id,bar_id,driver_id,city_id,dep
  (907 ,7, 101,502,5,1,1,700,'2026-09-15','EMPTY','老陈','2026-09-16 22:00+08'),
  (908 ,8, 104,502,5,1,1,700,'2026-09-15','DELIVERED','老陈',NULL);
 
--- 503 胡同里：小麦已开；回收在途；世涛清洗不合格
+-- 503 胡同里：小麦已开；回收在途；世涛清洗不合格→返修中
 INSERT INTO keg_cycles (id,keg_id,batch_id,order_id,bar_id,driver_id,city_id,deposit_amount,deposit_due_date,stage,bar_receiver,tapped_at) VALUES
  (909 ,9, 103,503,6,2,2,700,'2026-10-10','TAPPED','祥子','2026-09-15 20:00+08'),
  (910 ,10,103,503,6,2,2,700,'2026-10-10','RETURNED','祥子','2026-09-14 19:00+08'),
- (911 ,11,102,503,6,2,2,700,'2026-10-10','FAILED','祥子','2026-09-12 18:00+08');
+ (911 ,11,102,503,6,2,2,700,'2026-10-10','REPAIRING','祥子','2026-09-12 18:00+08');
 UPDATE keg_cycles SET emptied_at='2026-09-19 23:00+08', picked_at='2026-09-20 10:00+08' WHERE id=910;
+-- KEG-0011 清洗不合格已发起返修（RP-0001）：押金扣减随返修单同步生成，账单待财务确认后补结算时间
 UPDATE keg_cycles SET emptied_at='2026-09-18 23:00+08', picked_at='2026-09-19 10:00+08',
                       deposit_status='PARTIAL', released_amount=550, deducted_amount=150,
-                      deduct_reason='桶体变形+明显残液+封盖损坏，清洗厂检测不合格',
-                      settled_by=4, settled_at='2026-09-22 16:00+08', deformed=TRUE WHERE id=911;
+                      deduct_reason='清洗不合格返修（RP-0001/阀门损坏）：押金扣减 ¥150，账单待财务确认',
+                      deformed=TRUE WHERE id=911;
 
 -- 504 老订单：世涛桶丢失，押金全扣，逾期
 INSERT INTO keg_cycles (id,keg_id,batch_id,order_id,bar_id,driver_id,city_id,deposit_amount,deposit_due_date,stage,bar_receiver,tapped_at) VALUES
@@ -110,13 +112,19 @@ UPDATE keg_cycles SET emptied_at='2026-09-01 23:00+08', lost=TRUE, late_return=T
                       deduct_reason='超账期未归还且酒桶确认丢失', settled_by=4, settled_at='2026-09-24 11:00+08'
 WHERE id=913;
 
--- 505 泡沫实验室：小麦桶正常回收清洗合格已退款；另一只桶司机漏扫
+-- 505 泡沫实验室：小麦桶正常回收清洗合格已退款；一只桶司机漏扫；一只 IPA 桶异味返修已闭环
 INSERT INTO keg_cycles (id,keg_id,batch_id,order_id,bar_id,driver_id,city_id,deposit_amount,deposit_due_date,stage,bar_receiver,tapped_at) VALUES
  (914 ,14,103,505,4,1,1,500,'2026-10-01','WASHED','阿May','2026-09-08 18:00+08'),
- (915 ,15,101,505,4,1,1,500,'2026-10-01','RETURNED','阿May','2026-09-09 18:00+08');
+ (915 ,15,101,505,4,1,1,500,'2026-10-01','RETURNED','阿May','2026-09-09 18:00+08'),
+ (916 ,16,101,505,4,1,1,500,'2026-10-01','WASHED','阿May','2026-09-05 19:00+08');
 UPDATE keg_cycles SET emptied_at='2026-09-20 23:50+08', picked_at='2026-09-22 13:00+08',
                       deposit_status='RELEASED', released_amount=500, settled_by=4, settled_at='2026-09-23 10:00+08' WHERE id=914;
 UPDATE keg_cycles SET emptied_at='2026-09-21 23:00+08', picked_at='2026-09-22 13:00+08', missing_scan=TRUE WHERE id=915;
+-- KEG-0016 清洗不合格→返修→复检确认闭环：押金部分扣款（返修账单已确认）
+UPDATE keg_cycles SET emptied_at='2026-09-17 23:00+08', picked_at='2026-09-18 14:10+08',
+                      deposit_status='PARTIAL', released_amount=380, deducted_amount=120,
+                      deduct_reason='清洗不合格返修：桶内异味（RP-0002），押金扣减 ¥120',
+                      settled_by=4, settled_at='2026-09-22 10:00+08' WHERE id=916;
 
 SELECT setval(pg_get_serial_sequence('keg_cycles','id'), 1000);
 
@@ -126,7 +134,7 @@ INSERT INTO order_items (order_id, batch_id, keg_id, qty) VALUES
  (502,102,5,1),(502,101,6,1),(502,101,7,1),(502,104,8,1),
  (503,103,9,1),(503,103,10,1),(503,102,11,1),
  (504,102,13,1),
- (505,103,14,1),(505,101,15,1),
+ (505,103,14,1),(505,101,15,1),(505,101,16,1),
  (506,104,NULL,2),(506,101,NULL,2),
  (507,103,NULL,2);
 
@@ -137,9 +145,13 @@ UPDATE kegs k SET asset_status='PICKED', current_bar_id=c.bar_id, current_cycle_
 FROM keg_cycles c WHERE c.keg_id=k.id AND c.id IN (910,915);
 UPDATE kegs k SET asset_status='IN_STOCK', current_bar_id=NULL, current_cycle_id=c.id
 FROM keg_cycles c WHERE c.keg_id=k.id AND c.id=914;
+-- KEG-0016 返修闭环后回库，恢复再灌装资格
+UPDATE kegs k SET asset_status='IN_STOCK', current_bar_id=NULL, current_cycle_id=c.id, refillable=TRUE
+FROM keg_cycles c WHERE c.keg_id=k.id AND c.id=916;
 UPDATE kegs k SET asset_status='IN_STOCK', current_bar_id=NULL, current_cycle_id=c.id, refillable=FALSE
 FROM keg_cycles c WHERE c.keg_id=k.id AND c.id=912;
-UPDATE kegs k SET asset_status='WASH_FAIL', current_bar_id=NULL, current_cycle_id=c.id, refillable=FALSE
+-- KEG-0011 清洗不合格返修中：暂停再灌装
+UPDATE kegs k SET asset_status='REPAIR', current_bar_id=NULL, current_cycle_id=c.id, refillable=FALSE
 FROM keg_cycles c WHERE c.keg_id=k.id AND c.id=911;
 UPDATE kegs k SET asset_status='LOST', current_bar_id=c.bar_id, current_cycle_id=c.id
 FROM keg_cycles c WHERE c.keg_id=k.id AND c.id=913;
@@ -169,15 +181,70 @@ INSERT INTO pickup_scans (cycle_id,reservation_id,driver_id,scanned_code,appeara
  -- 同次预约应收 2 只，KEG-0015 无扫码记录 → 漏扫
  (910,803,2,'KEG-0010','完好','少量','已封盖','2026-09-20 10:10+08'),
  (911,804,2,'KEG-0011','变形','明显残液','封盖损坏','2026-09-19 10:20+08'),
- (912,NULL,1,'KEG-0012','完好','无','已封盖','2026-09-22 14:00+08');
+ (912,NULL,1,'KEG-0012','完好','无','已封盖','2026-09-22 14:00+08'),
+ (916,NULL,1,'KEG-0016','完好','少量','已封盖','2026-09-18 14:10+08');
 
 -- ---------- 清洗厂检测 ----------
-INSERT INTO wash_checks (id,cycle_id,washplant_id,inspector,passed,pressure_ok,seal_ok,cleanliness_ok,defect_note,checked_at) VALUES
- (701,912,1,'刘师傅',TRUE,TRUE,TRUE,TRUE,NULL,'2026-09-23 09:00+08'),
- (702,914,1,'刘师傅',TRUE,TRUE,TRUE,TRUE,NULL,'2026-09-23 09:10+08'),
- (703,911,2,'马师傅',FALSE,TRUE,FALSE,FALSE,'桶身变形、密封圈损坏、内壁残留明显，不得再灌装','2026-09-21 15:00+08');
+INSERT INTO wash_checks (id,cycle_id,washplant_id,wash_batch_no,inspector,passed,pressure_ok,seal_ok,cleanliness_ok,defect_note,checked_at) VALUES
+ (701,912,1,'WB-20260923-SH-A','刘师傅',TRUE,TRUE,TRUE,TRUE,NULL,'2026-09-23 09:00+08'),
+ (702,914,1,'WB-20260923-SH-A','刘师傅',TRUE,TRUE,TRUE,TRUE,NULL,'2026-09-23 09:10+08'),
+ (703,911,2,'WB-20260921-BJ-B','马师傅',FALSE,TRUE,FALSE,FALSE,'桶身变形、密封圈损坏、内壁残留明显，不得再灌装','2026-09-21 15:00+08'),
+ (704,916,1,'WB-20260919-SH-A','刘师傅',FALSE,TRUE,TRUE,FALSE,'开桶检测桶内有明显异味（酸臭），怀疑残液未清，转返修','2026-09-19 16:00+08');
 UPDATE keg_cycles SET wash_id=w.id FROM wash_checks w WHERE w.cycle_id=keg_cycles.id;
 SELECT setval(pg_get_serial_sequence('wash_checks','id'), 800);
+
+-- ---------- 清洗不合格返修 ----------
+-- RP-0001：KEG-0011 阀门损坏，返修中（已生成酒吧返修费与押金扣减账单，待财务确认）
+INSERT INTO keg_repairs
+ (id,repair_no,keg_id,cycle_id,wash_check_id,washplant_id,wash_batch_no,bar_id,driver_id,batch_id,
+  defect_type,defect_note,repair_fee,deposit_deduct,fee_party,status,created_at)
+VALUES
+ (1,'RP-0001',11,911,703,2,'WB-20260921-BJ-B',6,2,102,
+  '阀门损坏','阀门（出酒接头）密封圈损坏无法保压，桶身凹陷，返修更换阀门组件',
+  180,150,'BAR','OPEN','2026-09-21 15:30+08');
+
+-- RP-0002：KEG-0016 桶内异味，返修完成并经酒厂仓库复检确认，回库恢复再灌装；账单已确认
+INSERT INTO keg_repairs
+ (id,repair_no,keg_id,cycle_id,wash_check_id,washplant_id,wash_batch_no,bar_id,driver_id,batch_id,
+  defect_type,defect_note,repair_fee,deposit_deduct,fee_party,status,
+  recheck_result,recheck_inspector,recheck_note,submitted_at,confirmed_by,confirmed_at,confirm_note,created_at)
+VALUES
+ (2,'RP-0002',16,916,704,1,'WB-20260919-SH-A',4,1,101,
+  '异味','桶内酸臭异味、内壁残留；深度清洗+更换密封件后复检',
+  80,120,'BAR','CONFIRMED',
+  '合格','刘师傅','深度酸洗+蒸汽灭菌两轮，异味消除，耐压/密封/内壁检测全部合格','2026-09-21 14:00+08',
+  2,'2026-09-22 09:30+08','复检照片齐全，桶况达标，恢复再灌装','2026-09-19 16:30+08');
+SELECT setval(pg_get_serial_sequence('keg_repairs','id'), 100);
+
+-- 桶体照片（1x1 PNG 占位图，仓库长期保留桶体照片，可在返修详情中下载查看）
+INSERT INTO repair_photos (id,repair_id,stage,file_name,content_type,data,uploaded_by,created_at)
+SELECT g,
+       CASE WHEN g<=2 THEN 1 ELSE 2 END,
+       CASE WHEN g IN (1,3) THEN 'DEFECT' ELSE 'RECHECK' END,
+       'keg-' || CASE WHEN g<=2 THEN '0011' ELSE '0016' END || '-' ||
+         CASE WHEN g IN (1,3) THEN 'defect' ELSE 'recheck' END || '.png',
+       'image/png',
+       decode('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8ffff3f0005fe02fe80cf19a90000000049454e44ae426082','hex'),
+       CASE WHEN g<=2 THEN 31 ELSE 30 END,
+       CASE WHEN g=1 THEN '2026-09-21 15:31+08' WHEN g=2 THEN '2026-09-21 15:32+08'
+            WHEN g=3 THEN '2026-09-19 16:31+08' ELSE '2026-09-21 14:01+08' END::timestamptz
+FROM generate_series(1,4) g;
+SELECT setval(pg_get_serial_sequence('repair_photos','id'), 100);
+
+-- 返修账单：返修费与押金扣减分别入账，费用进入对应酒吧账单。RP-0001 待财务确认，RP-0002 已确认同步
+INSERT INTO billing_charges
+ (id,repair_id,keg_id,cycle_id,charge_type,party_type,party_id,bar_id,amount,memo,status,created_by,confirmed_by,confirmed_at,created_at)
+VALUES
+ (1,1,11,911,'REPAIR_FEE','BAR',6,6,180,'RP-0001 阀门损坏返修工时+配件费','PENDING',30,NULL,NULL,'2026-09-21 15:30+08'),
+ (2,1,11,911,'DEPOSIT_DEDUCT','BAR',6,6,150,'RP-0001 押金扣减（阀门损坏+桶身凹陷）','PENDING',30,NULL,NULL,'2026-09-21 15:30+08'),
+ (3,2,16,916,'REPAIR_FEE','BAR',4,4,80,'RP-0002 异味深度清洗返修费','CONFIRMED',30,4,'2026-09-22 10:00+08','2026-09-19 16:30+08'),
+ (4,2,16,916,'DEPOSIT_DEDUCT','BAR',4,4,120,'RP-0002 押金扣减（桶内异味）','CONFIRMED',30,4,'2026-09-22 10:00+08','2026-09-19 16:30+08');
+SELECT setval(pg_get_serial_sequence('billing_charges','id'), 100);
+
+-- 返修通知：追溯到的上一家酒吧
+INSERT INTO notifications (batch_id,audience,target_id,title,body) VALUES
+ (102,'BAR',6,'清洗不合格返修通知：KEG-0011（RP-0001）','贵店归还的 KEG-0011 在清洗批次 WB-20260921-BJ-B 检测中发现阀门损坏，已转返修：返修费 ¥180、押金扣减 ¥150，账单待财务确认。'),
+ (101,'BAR',4,'返修复检合格通知：KEG-0016（RP-0002）','KEG-0016 异味返修后经酒厂仓库复检合格恢复灌装；返修费 ¥80、押金扣减 ¥120 已确认并入账。');
 
 -- ---------- 停售通知（酸啤 BT2026-SOUR-01） ----------
 INSERT INTO notifications (batch_id,audience,target_id,title,body) VALUES
@@ -205,5 +272,22 @@ FROM keg_cycles c JOIN wash_checks w ON w.cycle_id=c.id WHERE NOT w.passed;
 INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor)
 SELECT keg_id,id,'DEPOSIT_SETTLED',jsonb_build_object('status',deposit_status,'released',released_amount,'deducted',deducted_amount),'财务'
 FROM keg_cycles WHERE deposit_status<>'HELD';
+
+-- 返修事件（由返修单回填）
+INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor)
+SELECT r.keg_id,r.cycle_id,'REPAIR_CREATED',
+       jsonb_build_object('repair_no',r.repair_no,'defect_type',r.defect_type,
+                          'wash_batch_no',r.wash_batch_no,'bar_id',r.bar_id,'driver_id',r.driver_id,
+                          'repair_fee',r.repair_fee,'deposit_deduct',r.deposit_deduct,'fee_party',r.fee_party),
+       '清洗厂'
+FROM keg_repairs r;
+INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor)
+SELECT r.keg_id,r.cycle_id,'REPAIR_SUBMITTED',
+       jsonb_build_object('repair_no',r.repair_no,'recheck_result',r.recheck_result),'清洗厂'
+FROM keg_repairs r WHERE r.submitted_at IS NOT NULL;
+INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor)
+SELECT r.keg_id,r.cycle_id,'REPAIR_CONFIRMED',
+       jsonb_build_object('repair_no',r.repair_no,'refillable',TRUE,'note',r.confirm_note),'酒厂仓库'
+FROM keg_repairs r WHERE r.confirmed_at IS NOT NULL;
 
 COMMIT;

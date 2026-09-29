@@ -3,6 +3,8 @@ package main
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // GET /api/wash/pending  已回收待清洗（按洗桶厂所在城市过滤）
@@ -63,6 +65,7 @@ func handleWashCheck(w http.ResponseWriter, r *http.Request) {
 		SealOK        *bool  `json:"seal_ok"`
 		CleanlinessOK *bool  `json:"cleanliness_ok"`
 		DefectNote    string `json:"defect_note"`
+		WashBatchNo   string `json:"wash_batch_no"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		fail(w, 400, err.Error())
@@ -90,6 +93,11 @@ func handleWashCheck(w http.ResponseWriter, r *http.Request) {
 	if u.Role == "admin" || washID == 0 {
 		_ = db.QueryRow(`SELECT id FROM washplants ORDER BY id LIMIT 1`).Scan(&washID)
 	}
+	// 清洗批次号：缺省按 WB-日期-WP清洗厂 生成（返修追溯依据）
+	washBatch := req.WashBatchNo
+	if washBatch == "" {
+		washBatch = "WB-" + time.Now().Format("20060102") + "-WP" + strconv.FormatInt(washID, 10)
+	}
 
 	resp := M{}
 	err := runTx(func(tx *sql.Tx) error {
@@ -105,9 +113,9 @@ func handleWashCheck(w http.ResponseWriter, r *http.Request) {
 
 		var washIDCol int64
 		if err := tx.QueryRow(`INSERT INTO wash_checks
-			(cycle_id,washplant_id,inspector,passed,pressure_ok,seal_ok,cleanliness_ok,defect_note)
-			VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,NULLIF($8,'')) RETURNING id`,
-			req.CycleID, washID, req.Inspector, passed, pressure, seal, clean, req.DefectNote).
+			(cycle_id,washplant_id,wash_batch_no,inspector,passed,pressure_ok,seal_ok,cleanliness_ok,defect_note)
+			VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,NULLIF($9,'')) RETURNING id`,
+			req.CycleID, washID, washBatch, req.Inspector, passed, pressure, seal, clean, req.DefectNote).
 			Scan(&washIDCol); err != nil {
 			return err
 		}
@@ -127,7 +135,8 @@ func handleWashCheck(w http.ResponseWriter, r *http.Request) {
 			}
 			resp = M{"passed": true, "asset_status": "IN_STOCK", "refillable": true}
 		} else {
-			if _, err := tx.Exec(`UPDATE keg_cycles SET stage='FAILED', wash_id=$1, deformed=TRUE WHERE id=$2`,
+			// 不合格：桶冻结、取消再灌装资格，等待清洗厂发起返修（异味/阀门损坏…）
+			if _, err := tx.Exec(`UPDATE keg_cycles SET stage='FAILED', wash_id=$1 WHERE id=$2`,
 				washIDCol, req.CycleID); err != nil {
 				return err
 			}

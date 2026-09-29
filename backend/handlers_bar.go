@@ -18,7 +18,7 @@ func handleBarCycles(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, k.keg_code, k.capacity_liters, be.style, be.name, ba.batch_no, ba.status,
 		       c.stage, c.deposit_amount, c.deposit_due_date, c.tapped_at, c.emptied_at,
 		       c.deposit_status, c.late_return, c.missing_scan, c.lost,
-		       (CURRENT_DATE > c.deposit_due_date AND c.stage NOT IN ('WASHED','FAILED')) AS overdue
+		       (CURRENT_DATE > c.deposit_due_date AND c.stage NOT IN ('WASHED','FAILED','REPAIRING')) AS overdue
 		FROM keg_cycles c
 		JOIN kegs k ON k.id=c.keg_id
 		JOIN batches ba ON ba.id=c.batch_id
