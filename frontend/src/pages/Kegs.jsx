@@ -120,6 +120,11 @@ const EVENT_NAME = {
   DELIVERED: '配送签收', TAPPED: '开桶售酒', TAP_FEEDBACK: '开桶反馈', EMPTIED: '酒桶打空',
   RETURN_RESERVED: '预约回收', PICKED: '司机扫码回收', MISSING_SCAN: '司机漏扫（审计）',
   WASHED: '清洗检测合格·回库', WASH_FAILED: '清洗检测不合格',
+  REWORK_OPENED: '发起不合格返修（追溯/费用/停灌）',
+  REWORK_REINSPECTED: '返修完成·复检上传',
+  REWORK_CONFIRMED: '仓库确认·恢复可灌装',
+  REWORK_SCRAPPED: '仓库确认·桶报废',
+  REWORK_BILL_CONFIRMED: '返修费用账单入账',
   DEPOSIT_SETTLED: '押金结算', MARKED_LOST: '登记丢失'
 }
 

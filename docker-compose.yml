@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: keg
+      POSTGRES_PASSWORD: kegpass
+      POSTGRES_DB: kegplatform
+    ports:
+      - "5432:5432"
+    volumes:
+      - keg_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keg -d kegplatform"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      KEG_DSN: "host=db port=5432 user=keg dbname=kegplatform password=kegpass sslmode=disable"
+      KEG_ADDR: ":8080"
+      KEG_TOKEN_SECRET: "change-me-in-production"
+    ports:
+      - "8080:8080"
+
+volumes:
+  keg_pgdata:

@@ -249,6 +249,73 @@ CREATE TABLE IF NOT EXISTS keg_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 清洗不合格返修单：清洗厂发现桶内异味/阀门损坏等缺陷后发起，
+-- 平台据此追溯上一家酒吧、回收司机与清洗批次，并同步费用、押金扣减与停灌状态
+CREATE TABLE IF NOT EXISTS rework_orders (
+    id               BIGSERIAL PRIMARY KEY,
+    rework_no        TEXT NOT NULL UNIQUE,           -- 返修单号 RW-MMDD-001
+    cycle_id         BIGINT NOT NULL REFERENCES keg_cycles(id),
+    keg_id           BIGINT NOT NULL REFERENCES kegs(id),
+    wash_check_id    BIGINT REFERENCES wash_checks(id),  -- 首次不合格检测记录
+    washplant_id     BIGINT NOT NULL REFERENCES washplants(id),
+    -- 追溯快照：上一家酒吧 / 回收司机 / 清洗批次（同厂同日检测视为一个清洗批次）
+    bar_id           BIGINT REFERENCES bars(id),
+    driver_id        BIGINT REFERENCES drivers(id),
+    wash_batch_no    TEXT,
+    defect_type      TEXT NOT NULL DEFAULT 'OTHER'
+        CHECK (defect_type IN ('ODOR','VALVE_DAMAGED','DEFORMED','RESIDUE','OTHER')),
+    defect_note      TEXT,
+    rework_fee       NUMERIC(10,2) NOT NULL DEFAULT 0,   -- 返修费用（进入责任方账单）
+    -- 费用承担方：BAR 上一家酒吧 / WASHPLANT 清洗厂（如判定为清洗工艺责任）
+    bill_party       TEXT NOT NULL DEFAULT 'BAR'
+        CHECK (bill_party IN ('BAR','WASHPLANT')),
+    deposit_deduct   NUMERIC(10,2) NOT NULL DEFAULT 0,   -- 同步生成的押金扣减
+    -- OPEN 待返修 / REWORKED 返修完成待仓库确认 / CONFIRMED 仓库确认恢复灌装 / SCRAPPED 报废
+    status           TEXT NOT NULL DEFAULT 'OPEN'
+        CHECK (status IN ('OPEN','REWORKED','CONFIRMED','SCRAPPED')),
+    -- 返修完成后清洗厂上传的复检结果
+    reinspect_result TEXT CHECK (reinspect_result IN ('PASSED','STILL_FAIL') OR reinspect_result IS NULL),
+    recheck_check_id BIGINT REFERENCES wash_checks(id),   -- 复检生成的检测记录
+    reinspect_note   TEXT,
+    reinspector      TEXT,
+    reinspected_at   TIMESTAMPTZ,
+    confirmed_by     BIGINT REFERENCES app_users(id),
+    confirmed_at     TIMESTAMPTZ,
+    confirm_note     TEXT,
+    created_by       BIGINT REFERENCES app_users(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 返修桶照片：FOUND 发现缺陷时的桶体照片（仓库留存）/ REINSPECT 复检照片
+CREATE TABLE IF NOT EXISTS rework_photos (
+    id           BIGSERIAL PRIMARY KEY,
+    rework_id    BIGINT NOT NULL REFERENCES rework_orders(id) ON DELETE CASCADE,
+    phase        TEXT NOT NULL CHECK (phase IN ('FOUND','REINSPECT')),
+    file_name    TEXT NOT NULL,
+    content_type TEXT,
+    data         BYTEA NOT NULL,
+    uploaded_by  BIGINT REFERENCES app_users(id),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 账单：返修费用进入对应酒吧或清洗厂账单，财务确认后入账
+CREATE TABLE IF NOT EXISTS billing_entries (
+    id           BIGSERIAL PRIMARY KEY,
+    party_type   TEXT NOT NULL CHECK (party_type IN ('BAR','WASHPLANT')),
+    party_id     BIGINT NOT NULL,                  -- bars.id / washplants.id
+    rework_id    BIGINT REFERENCES rework_orders(id),
+    cycle_id     BIGINT REFERENCES keg_cycles(id),
+    keg_code     TEXT,
+    item         TEXT NOT NULL,
+    amount       NUMERIC(10,2) NOT NULL,
+    -- PENDING 待财务确认 / CONFIRMED 已确认入账
+    status       TEXT NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING','CONFIRMED')),
+    confirmed_by BIGINT REFERENCES app_users(id),
+    confirmed_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_cycles_batch ON keg_cycles(batch_id);
 CREATE INDEX IF NOT EXISTS idx_cycles_bar ON keg_cycles(bar_id);
 CREATE INDEX IF NOT EXISTS idx_cycles_stage ON keg_cycles(stage);

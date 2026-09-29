@@ -27,7 +27,7 @@ func handleDeposits(w http.ResponseWriter, r *http.Request) {
 		WHERE 1=1`
 	args := []interface{}{}
 	if s := r.URL.Query().Get("status"); s != "" {
-		q += " AND c.deposit_status=$" + pidx(args)
+		q += " AND c.deposit_status=" + pidx(args)
 		args = append(args, s)
 	}
 	if r.URL.Query().Get("overdue") == "1" {

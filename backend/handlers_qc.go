@@ -62,10 +62,13 @@ func handleQCOverview(w http.ResponseWriter, r *http.Request) {
 			return M{"cycle_id": cid, "keg_id": kegID, "keg_code": code, "bar": bar, "reason": reason}, nil
 		})
 	}
-	washFails := abnormal(`SELECT c.id,k.id,k.keg_code,COALESCE(b.name,'-'),COALESCE(w.defect_note,'清洗不合格')
+	washFails := abnormal(`SELECT DISTINCT ON (c.id) c.id,k.id,k.keg_code,COALESCE(b.name,'-'),
+		COALESCE(w.defect_note,'清洗不合格')
 		FROM keg_cycles c JOIN kegs k ON k.id=c.keg_id
 		LEFT JOIN bars b ON b.id=c.bar_id
-		JOIN wash_checks w ON w.cycle_id=c.id WHERE NOT w.passed`)
+		JOIN wash_checks w ON w.cycle_id=c.id
+		WHERE NOT w.passed AND c.stage='FAILED'
+		ORDER BY c.id, w.id`)
 	lost := abnormal(`SELECT c.id,k.id,k.keg_code,COALESCE(b.name,'-'),'酒桶丢失'
 		FROM keg_cycles c JOIN kegs k ON k.id=c.keg_id
 		LEFT JOIN bars b ON b.id=c.bar_id WHERE c.lost`)

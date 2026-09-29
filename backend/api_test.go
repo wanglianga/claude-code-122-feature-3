@@ -360,6 +360,260 @@ func TestEndToEnd(t *testing.T) {
 			t.Fatalf("世涛批次被 2 家酒吧投诉口味异常，应建议停售")
 		}
 	})
+
+	t.Run("清洗不合格返修全流程", func(t *testing.T) {
+		wash2 := login(t, "wash2")
+		brewery := login(t, "brewery")
+		bar3 := login(t, "bar3")
+
+		// 1x1 合法 PNG（base64）
+		png := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+		// 种子已为 KEG-0011(cycle 911) 生成返修单 1101：wash2 / 胡同里 可见，账单 3001 待确认
+		code, d := doJSON(t, "GET", "/api/rework/orders", wash2, nil)
+		mustOK(t, code, d, "wash2 返修单列表")
+		var seedRW map[string]interface{}
+		for _, x := range d["orders"].([]interface{}) {
+			m := x.(map[string]interface{})
+			if m["rework_no"] == "RW-0921-001" {
+				seedRW = m
+			}
+		}
+		if seedRW == nil {
+			t.Fatalf("wash2 应看到种子返修单 RW-0921-001: %v", d["orders"])
+		}
+		if seedRW["bar"] != "胡同里 Beer Bar" || seedRW["driver"] != "李师傅" {
+			t.Fatalf("返修单追溯链错误: %v", seedRW)
+		}
+		if seedRW["rework_fee"].(float64) != 200 || seedRW["deposit_deduct"].(float64) != 150 {
+			t.Fatalf("返修费/押金扣减快照错误: %v", seedRW)
+		}
+		if seedRW["found_photos"].(float64) != 1 {
+			t.Fatalf("应留存 1 张发现照片: %v", seedRW)
+		}
+		// 责任酒吧可见本店返修单
+		code, d = doJSON(t, "GET", "/api/rework/orders", bar3, nil)
+		mustOK(t, code, d, "酒吧返修单列表")
+		saw := false
+		for _, x := range d["orders"].([]interface{}) {
+			if x.(map[string]interface{})["rework_no"] == "RW-0921-001" {
+				saw = true
+			}
+		}
+		if !saw {
+			t.Fatalf("胡同里应看到本店返修单")
+		}
+
+		// 910（KEG-0010）在前面的用例中被 wash1 判为清洗不合格 → 出现在待发起返修
+		code, d = doJSON(t, "GET", "/api/rework/pending", wash1, nil)
+		mustOK(t, code, d, "待返修列表")
+		var pend map[string]interface{}
+		for _, x := range d["pending"].([]interface{}) {
+			m := x.(map[string]interface{})
+			if m["cycle_id"].(float64) == 910 {
+				pend = m
+			}
+		}
+		if pend == nil {
+			t.Fatalf("KEG-0010(910) 应在待返修列表: %v", d["pending"])
+		}
+		if pend["bar"] != "胡同里 Beer Bar" || pend["driver"] != "李师傅" || pend["wash_batch_no"] == "" {
+			t.Fatalf("待返修追溯信息缺失: %v", pend)
+		}
+		// wash2（北京厂）不应看到 wash1 检出的桶
+		code, d = doJSON(t, "GET", "/api/rework/pending", wash2, nil)
+		mustOK(t, code, d, "wash2 待返修列表")
+		for _, x := range d["pending"].([]interface{}) {
+			if x.(map[string]interface{})["cycle_id"].(float64) == 910 {
+				t.Fatalf("wash2 不应看到 wash1 检出的待返修桶")
+			}
+		}
+
+		// 发起返修：费用 120 酒吧承担，押金扣减 200/700，附 1 张照片
+		code, d = doJSON(t, "POST", "/api/rework/orders", wash1, M{
+			"cycle_id": 910, "defect_type": "ODOR", "defect_note": "桶内有明显酸臭味，需除味返修",
+			"rework_fee": 120, "bill_party": "BAR", "deposit_deduct": 200,
+			"photos": []M{{"file_name": "keg10.png", "content_type": "image/png", "data": png}},
+		})
+		mustOK(t, code, d, "发起返修 910")
+		if d["status"] != "OPEN" || d["deposit_status"] != "PARTIAL" {
+			t.Fatalf("返修单状态/押金状态错误: %v", d)
+		}
+		rwID := int64(d["rework_id"].(float64))
+
+		// 桶仍暂停灌装
+		code, d = doJSON(t, "GET", "/api/kegs/trace/KEG-0010", admin, nil)
+		mustOK(t, code, d, "追溯 KEG-0010")
+		if d["keg"].(map[string]interface{})["refillable"] != false ||
+			d["keg"].(map[string]interface{})["asset_status"] != "WASH_FAIL" {
+			t.Fatalf("返修期间桶应 WASH_FAIL/禁灌装: %v", d["keg"])
+		}
+		if d["current"].(map[string]interface{})["deducted_amount"].(float64) != 200 {
+			t.Fatalf("押金应已扣减 200: %v", d["current"])
+		}
+
+		// 无照片拒绝
+		code, _ = doJSON(t, "POST", "/api/rework/orders", wash1, M{
+			"cycle_id": 911, "defect_type": "VALVE_DAMAGED", "defect_note": "x", "rework_fee": 10,
+		})
+		if code != 400 {
+			t.Fatalf("无照片发起返修应 400, 实际 %d", code)
+		}
+		// 重复发起拒绝
+		code, _ = doJSON(t, "POST", "/api/rework/orders", wash1, M{
+			"cycle_id": 910, "defect_type": "ODOR", "defect_note": "重复", "rework_fee": 1,
+			"photos": []M{{"file_name": "a.png", "content_type": "image/png", "data": png}},
+		})
+		if code != 400 {
+			t.Fatalf("重复发起返修应 400, 实际 %d", code)
+		}
+		// 越权复检
+		code, _ = doJSON(t, "POST", "/api/rework/reinspect/"+itoa(rwID), wash2, M{"passed": true})
+		if code != 400 {
+			t.Fatalf("wash2 复检 wash1 返修单应被拒, 实际 %d", code)
+		}
+
+		// 复检仍不合格 → 单据保持 OPEN
+		code, d = doJSON(t, "POST", "/api/rework/reinspect/"+itoa(rwID), wash1, M{
+			"passed": true, "seal_ok": false, "cleanliness_ok": false, "note": "除味不彻底",
+		})
+		mustOK(t, code, d, "复检仍不合格")
+		if d["passed"] != false || d["status"] != "OPEN" || d["reinspect_result"] != "STILL_FAIL" {
+			t.Fatalf("应保持返修中: %v", d)
+		}
+		// 再次复检合格（附复检照）→ REWORKED，等待仓库确认；桶此时仍不可灌装
+		code, d = doJSON(t, "POST", "/api/rework/reinspect/"+itoa(rwID), wash1, M{
+			"passed": true, "pressure_ok": true, "seal_ok": true, "cleanliness_ok": true,
+			"note": "二次除味完成，复检合格", "inspector": "刘师傅",
+			"photos": []M{{"file_name": "ok.png", "content_type": "image/png", "data": png}},
+		})
+		mustOK(t, code, d, "复检合格")
+		if d["status"] != "REWORKED" {
+			t.Fatalf("应进入待仓库确认: %v", d)
+		}
+		code, d = doJSON(t, "GET", "/api/kegs/trace/KEG-0010", admin, nil)
+		if d["keg"].(map[string]interface{})["refillable"] != false {
+			t.Fatalf("仓库确认前桶仍应禁灌装")
+		}
+
+		// 清洗厂不能做仓库确认
+		code, _ = doJSON(t, "POST", "/api/rework/confirm/"+itoa(rwID), wash1, M{"action": "restore"})
+		if code != 403 {
+			t.Fatalf("清洗厂仓库确认应 403, 实际 %d", code)
+		}
+		// 酒厂仓库确认恢复灌装
+		code, d = doJSON(t, "POST", "/api/rework/confirm/"+itoa(rwID), brewery,
+			M{"action": "restore", "note": "复检合格，准予回库"})
+		mustOK(t, code, d, "仓库确认恢复")
+		if d["asset_status"] != "IN_STOCK" || d["refillable"] != true {
+			t.Fatalf("应回库恢复灌装: %v", d)
+		}
+		code, d = doJSON(t, "GET", "/api/kegs/trace/KEG-0010", admin, nil)
+		if d["current"].(map[string]interface{})["stage"] != "WASHED" {
+			t.Fatalf("周期应回到 WASHED: %v", d["current"])
+		}
+		types := map[string]bool{}
+		for _, e := range d["events"].([]interface{}) {
+			types[e.(map[string]interface{})["event_type"].(string)] = true
+		}
+		for _, want := range []string{"REWORK_OPENED", "REWORK_REINSPECTED", "REWORK_CONFIRMED"} {
+			if !types[want] {
+				t.Fatalf("时间线缺少返修事件 %s: %v", want, types)
+			}
+		}
+
+		// 返修单详情含两类照片
+		code, d = doJSON(t, "GET", "/api/rework/orders/"+itoa(rwID), brewery, nil)
+		mustOK(t, code, d, "返修单详情")
+		o := d["order"].(map[string]interface{})
+		var foundN, reN int64
+		var photoID int64
+		for _, p := range o["photos"].([]interface{}) {
+			ph := p.(map[string]interface{})
+			if ph["phase"] == "FOUND" {
+				foundN++
+				photoID = int64(ph["id"].(float64))
+			}
+			if ph["phase"] == "REINSPECT" {
+				reN++
+			}
+		}
+		if foundN != 1 || reN != 1 {
+			t.Fatalf("应有 1 张发现照 + 1 张复检照: found=%d re=%d", foundN, reN)
+		}
+		// 照片无 token 401，带 token 200 且为 PNG
+		req, _ := http.NewRequest("GET", testServer.URL+"/api/rework/photo/"+itoa(photoID), nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 401 {
+			t.Fatalf("照片无 token 应 401, 实际 %d", res.StatusCode)
+		}
+		req, _ = http.NewRequest("GET", testServer.URL+"/api/rework/photo/"+itoa(photoID)+"?token="+wash1, nil)
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != 200 || !bytes.HasPrefix(img, []byte("\x89PNG")) {
+			t.Fatalf("照片应返回 PNG, status=%d bytes=%d", res.StatusCode, len(img))
+		}
+
+		// 账单：910 返修费 120 待财务确认；确认后入账
+		code, d = doJSON(t, "GET", "/api/finance/bills?status=PENDING", finance, nil)
+		mustOK(t, code, d, "待确认账单")
+		var bill map[string]interface{}
+		for _, x := range d["bills"].([]interface{}) {
+			m := x.(map[string]interface{})
+			if m["rework_no"] != nil && m["keg_code"] == "KEG-0010" {
+				bill = m
+			}
+		}
+		if bill == nil || bill["amount"].(float64) != 120 || bill["party_type"] != "BAR" {
+			t.Fatalf("应存在 KEG-0010 酒吧待确认账单 ¥120: %v", d["bills"])
+		}
+		billID := int64(bill["id"].(float64))
+		code, d = doJSON(t, "POST", "/api/finance/bills/confirm/"+itoa(billID), finance, nil)
+		mustOK(t, code, d, "财务确认账单")
+		// 重复确认拒绝
+		code, _ = doJSON(t, "POST", "/api/finance/bills/confirm/"+itoa(billID), finance, nil)
+		if code != 400 {
+			t.Fatalf("重复确认账单应 400, 实际 %d", code)
+		}
+		// 清洗厂承担场景：915 洗成不合格后发起返修，费用挂清洗厂账单
+		code, d = doJSON(t, "POST", "/api/wash/checks", wash1, M{
+			"cycle_id": 915, "passed": true, "pressure_ok": true, "seal_ok": false,
+			"cleanliness_ok": false, "defect_note": "清洗工艺不到位，密封件受损",
+		})
+		mustOK(t, code, d, "915 清洗不合格")
+		code, d = doJSON(t, "POST", "/api/rework/orders", wash1, M{
+			"cycle_id": 915, "defect_type": "VALVE_DAMAGED", "defect_note": "判定清洗厂工艺责任",
+			"rework_fee": 80, "bill_party": "WASHPLANT", "deposit_deduct": 0,
+			"photos": []M{{"file_name": "keg15.png", "content_type": "image/png", "data": png}},
+		})
+		mustOK(t, code, d, "发起清洗厂承担返修 915")
+		code, d = doJSON(t, "GET", "/api/finance/bills", wash1, nil)
+		mustOK(t, code, d, "清洗厂账单")
+		hitWP := false
+		for _, x := range d["bills"].([]interface{}) {
+			m := x.(map[string]interface{})
+			if m["party_type"] == "WASHPLANT" && m["keg_code"] == "KEG-0015" && m["amount"].(float64) == 80 {
+				hitWP = true
+			}
+		}
+		if !hitWP {
+			t.Fatalf("清洗厂应看到本厂承担的 KEG-0015 账单: %v", d["bills"])
+		}
+		// 财务无权确认不存在的账单已在上面覆盖；总览含返修计数
+		code, d = doJSON(t, "GET", "/api/overview", admin, nil)
+		mustOK(t, code, d, "总览")
+		if d["rework_open"].(float64) < 1 {
+			t.Fatalf("总览返修中计数应 ≥1: %v", d)
+		}
+	})
 }
 
 func TestRegisterKegsNumbering(t *testing.T) {

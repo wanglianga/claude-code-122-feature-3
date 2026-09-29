@@ -1,0 +1,8 @@
+**/node_modules/
+.pgdata/
+.npm-cache/
+**/dist/
+backend/kegplatform
+*.log
+.git/
+.claude/

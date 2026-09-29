@@ -14,6 +14,7 @@ INSERT INTO app_users (id, username, display_name, role, org_id, password_sha) V
  (20,'driver1','王师傅(上海司机)','driver',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (21,'driver2','李师傅(北京司机)','driver',2,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (30,'wash1','上海净桶中心','washplant',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
+ (31,'wash2','北京洗桶站·马师傅','washplant',2,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791'),
  (40,'dealer1','华东精酿经销·林经理','dealer',1,'d3ad9315b7be5dd53b31a273b3b3aba5defe700808305aa16a3062b76658a791');
 SELECT setval(pg_get_serial_sequence('app_users','id'), 100);
 
@@ -205,5 +206,33 @@ FROM keg_cycles c JOIN wash_checks w ON w.cycle_id=c.id WHERE NOT w.passed;
 INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor)
 SELECT keg_id,id,'DEPOSIT_SETTLED',jsonb_build_object('status',deposit_status,'released',released_amount,'deducted',deducted_amount),'财务'
 FROM keg_cycles WHERE deposit_status<>'HELD';
+
+-- ---------- 清洗不合格返修（KEG-0011：阀门损坏 + 桶内异味） ----------
+INSERT INTO rework_orders
+ (id,rework_no,cycle_id,keg_id,wash_check_id,washplant_id,bar_id,driver_id,wash_batch_no,
+  defect_type,defect_note,rework_fee,bill_party,deposit_deduct,status,created_by)
+VALUES
+ (1101,'RW-0921-001',911,11,703,2,6,2,'WASH-20260921-02',
+  'VALVE_DAMAGED','阀门损坏无法保压，桶内残留明显异味，退回返修更换阀门并做除味处理',
+  200.00,'BAR',150.00,'OPEN',30);
+SELECT setval(pg_get_serial_sequence('rework_orders','id'), 1200);
+
+-- 仓库留存的发现缺陷桶体照片（1x1 占位 PNG）
+INSERT INTO rework_photos (id,rework_id,phase,file_name,content_type,data,uploaded_by) VALUES
+ (2001,1101,'FOUND','KEG-0011-valve.png','image/png',
+  decode('89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000B4944415478DA6364F8CF500F00038601805A347D6B0000000049454E44AE426082','hex'),
+  30);
+SELECT setval(pg_get_serial_sequence('rework_photos','id'), 2100);
+
+-- 返修费用账单：责任方为上一家酒吧（胡同里），待财务确认
+INSERT INTO billing_entries (id,party_type,party_id,rework_id,cycle_id,keg_code,item,amount,status) VALUES
+ (3001,'BAR',6,1101,911,'KEG-0011','清洗不合格返修费（阀门损坏+异味除味）',200.00,'PENDING');
+SELECT setval(pg_get_serial_sequence('billing_entries','id'), 3100);
+
+INSERT INTO keg_events (keg_id,cycle_id,event_type,detail,actor) VALUES
+ (11,911,'REWORK_OPENED',
+  jsonb_build_object('rework_no','RW-0921-001','defect','VALVE_DAMAGED','bar','胡同里 Beer Bar',
+                    'driver','李师傅','wash_batch','WASH-20260921-02','fee',200,'bill_party','BAR',
+                    'deposit_deduct',150),'清洗厂');
 
 COMMIT;

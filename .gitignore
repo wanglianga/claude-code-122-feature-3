@@ -8,6 +8,8 @@ backend/kegplatform
 **/node_modules/
 frontend/dist/
 **/dist/
+!backend/web/dist/
+!backend/web/dist/**
 **/build/
 coverage/
 .env

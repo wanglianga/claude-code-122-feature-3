@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api.js'
 import { useToast, Empty } from '../components.jsx'
 
@@ -14,6 +15,13 @@ export default function WashPage() {
       <h1>清洗厂检测</h1>
       <div className="muted small" style={{ marginBottom: 12 }}>
         对司机收回的空桶做耐压、密封、内壁清洁检测；合格桶回库恢复再灌装资格，不合格桶冻结并通知品控/财务。
+      </div>
+      <div className="suggest danger" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span>发现桶内异味 / 阀门损坏等清洗不合格情况？检测后请到「不合格返修」发起返修单并上传桶体照片。</span>
+        <Link to="/rework" className="small" style={{
+          whiteSpace: 'nowrap', display: 'inline-block', padding: '3px 9px', borderRadius: 5,
+          background: 'var(--danger)', color: '#fff', textDecoration: 'none'
+        }}>去发起返修 →</Link>
       </div>
       <div className="tablewrap panel" style={{ padding: 0 }}>
         <table>

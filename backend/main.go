@@ -61,6 +61,16 @@ func main() {
 }
 
 func initDB() error {
+	// 已初始化过的库直接跳过（schema 全部 IF NOT EXISTS，种子不可重复灌入）
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM information_schema.tables
+		WHERE table_schema='public'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		log.Printf("数据库已存在 %d 张表，跳过 schema/种子初始化", n)
+		return nil
+	}
 	for _, name := range []string{"db/schema.sql", "db/seed.sql"} {
 		b, err := sqlFS.ReadFile(name)
 		if err != nil {
@@ -115,12 +125,22 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/wash/pending", hr("washplant brewery admin", handleWashPending))
 	mux.HandleFunc("/api/wash/checks", hr("washplant admin", handleWashCheck))
 
+	// 清洗不合格返修
+	mux.HandleFunc("/api/rework/pending", hr("washplant brewery admin qc", handleReworkPending))
+	mux.HandleFunc("/api/rework/orders", hr("washplant brewery admin qc finance bar_manager", handleReworkOrders))
+	mux.HandleFunc("/api/rework/orders/", h(handleReworkDetail))
+	mux.HandleFunc("/api/rework/reinspect/", hr("washplant admin", handleReworkReinspect))
+	mux.HandleFunc("/api/rework/confirm/", hr("brewery admin", handleReworkConfirm))
+	mux.HandleFunc("/api/rework/photo/", handleReworkPhoto)
+
 	// 品控
 	mux.HandleFunc("/api/qc/overview", hr("qc brewery admin", handleQCOverview))
 
 	// 财务
 	mux.HandleFunc("/api/finance/deposits", hr("finance brewery admin", handleDeposits))
 	mux.HandleFunc("/api/finance/settle/", hr("finance admin", handleSettleDeposit))
+	mux.HandleFunc("/api/finance/bills", hr("finance brewery admin washplant bar_manager", handleBillingEntries))
+	mux.HandleFunc("/api/finance/bills/confirm/", hr("finance admin", handleConfirmBilling))
 
 	// 通知
 	mux.HandleFunc("/api/notifications", h(handleNotifications))

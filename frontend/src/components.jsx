@@ -21,6 +21,15 @@ export const BATCH_STATUS = {
   RECALLED: ['召回中', 'red'], CLEARED: ['已解除', 'gray']
 }
 export const RES_STATUS = { WAITING: ['待取桶', 'amber'], PICKED: ['已取桶', 'green'], MISSED: ['爽约/逾期', 'red'], CANCELLED: ['已取消', 'gray'] }
+export const REWORK_STATUS = {
+  OPEN: ['返修中', 'red'], REWORKED: ['待仓库确认', 'amber'],
+  CONFIRMED: ['已恢复灌装', 'green'], SCRAPPED: ['已报废', 'gray']
+}
+export const REWORK_DEFECT = {
+  ODOR: '桶内异味', VALVE_DAMAGED: '阀门损坏', DEFORMED: '桶体变形',
+  RESIDUE: '内壁残液', OTHER: '其他缺陷'
+}
+export const BILL_STATUS = { PENDING: ['待财务确认', 'amber'], CONFIRMED: ['已入账', 'green'] }
 export const AUDIENCE = { BAR: '已收货酒吧', PENDING_ORDER: '待配送订单', DEALER_STOCK: '经销商库存', ALL: '全渠道' }
 
 export function Badge({ map, value }) {
